@@ -9,8 +9,19 @@
 #define LAYER_H
 #endif
 
-const static float dt = 1.0E-01f;
+static float dt = 5.0E-02f;  // Initial learning rate (will decay over time)
 const static float threshold = 1.0E-02f;
+
+// Function to update learning rate with decay
+void update_learning_rate(int epoch, int total_epochs) {
+    // Learning rate decay: reduce by factor over time
+    float initial_lr = 5.0E-02f;
+    float decay_factor = 0.95f;  // Decay by 5% each epoch
+    dt = initial_lr * pow(decay_factor, epoch);
+    
+    // Ensure learning rate doesn't get too small
+    if (dt < 1.0E-04f) dt = 1.0E-04f;
+}
 
 class Layer {
 	public:
@@ -181,21 +192,21 @@ void fp_s1(const float input[6][24][24], float preact[6][6][6], const float weig
 }
 
 
-void fp_preact_f(const float input[6][6][6], float preact[10], const float weight[10][6][6][6]) {
+void fp_preact_f(const float input[6][6][6], float *preact, const float *weight, int num_outputs) {
     // Initialize the output preactivation array to zero
     
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < num_outputs; ++i) {
         preact[i] = 0;
     }
 
     // Compute the dot product of the input with weights for each output unit
     
-    for (int i = 0; i < 10; ++i) { // output dimension
+    for (int i = 0; i < num_outputs; ++i) { // output dimension
         for (int j = 0; j < 6; ++j) { // first dimension of input
             for (int k = 0; k < 6; ++k) { // second dimension of input
                 for (int l = 0; l < 6; ++l) { // third dimension of input
-                    
-                    preact[i] += weight[i][j][k][l] * input[j][k][l];
+                    int weight_idx = i * 6 * 6 * 6 + j * 6 * 6 + k * 6 + l;
+                    preact[i] += weight[weight_idx] * input[j][k][l];
                 }
             }
         }
@@ -203,38 +214,39 @@ void fp_preact_f(const float input[6][6][6], float preact[10], const float weigh
 }
 
 
-void fp_bias_f(float preact[10], const float bias[10]) {
+void fp_bias_f(float *preact, const float *bias, int num_outputs) {
     // Iterate through each element of the preact array and add the corresponding bias
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < num_outputs; ++i) {
         preact[i] += bias[i];
     }
 }
 
 
-void bp_weight_f(float d_weight[10][6][6][6], const float d_preact[10], const float p_output[6][6][6]) {
+void bp_weight_f(float *d_weight, const float *d_preact, const float p_output[6][6][6], int num_outputs) {
     // Iterate over all indices for weight updates
     
-    for (int i = 0; i < 10; ++i) { // over output dimension
+    for (int i = 0; i < num_outputs; ++i) { // over output dimension
         for (int j = 0; j < 6; ++j) { // first dimension of input
             for (int k = 0; k < 6; ++k) { // second dimension of input
                 for (int l = 0; l < 6; ++l) { // third dimension of input
                     // Calculate the gradient for each weight
-                    d_weight[i][j][k][l] = d_preact[i] * p_output[j][k][l];
+                    int weight_idx = i * 6 * 6 * 6 + j * 6 * 6 + k * 6 + l;
+                    d_weight[weight_idx] = d_preact[i] * p_output[j][k][l];
                 }
             }
         }
     }
 }
 
-void bp_bias_f(float bias[10], const float d_preact[10]) {
+void bp_bias_f(float *bias, const float *d_preact, int num_outputs) {
     // Iterate over each bias and update it based on the gradient
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < num_outputs; ++i) {
         bias[i] += dt * d_preact[i];
     }
 }
 
 
-void bp_output_s1(float d_output[6][6][6], const float n_weight[10][6][6][6], const float nd_preact[10]) {
+void bp_output_s1(float d_output[6][6][6], const float *n_weight, const float *nd_preact, int num_outputs) {
     // Initialize d_output to zero before accumulation
     for (int i = 0; i < 6; ++i) {
         for (int j = 0; j < 6; ++j) {
@@ -245,11 +257,12 @@ void bp_output_s1(float d_output[6][6][6], const float n_weight[10][6][6][6], co
     }
 
     // Compute the gradient contribution from each neuron's weight and pre-activation gradient
-    for (int i1 = 0; i1 < 10; ++i1) { // over each output neuron
+    for (int i1 = 0; i1 < num_outputs; ++i1) { // over each output neuron
         for (int i2 = 0; i2 < 6; ++i2) { // first dimension of output
             for (int i3 = 0; i3 < 6; ++i3) { // second dimension of output
                 for (int i4 = 0; i4 < 6; ++i4) { // third dimension of output
-                    d_output[i2][i3][i4] += n_weight[i1][i2][i3][i4] * nd_preact[i1];
+                    int weight_idx = i1 * 6 * 6 * 6 + i2 * 6 * 6 + i3 * 6 + i4;
+                    d_output[i2][i3][i4] += n_weight[weight_idx] * nd_preact[i1];
                 }
             }
         }

@@ -1,6 +1,4 @@
-#define USE_MNIST_LOADER
-#define MNIST_DOUBLE
-#include "mnist.h" 
+#include "image_loader.h" 
 #include "layer.h"
 #include <cstdio>
 #include <ctime>
@@ -12,14 +10,14 @@
 #include <cstdlib>
 #include <omp.h>
     
-static mnist_data *train_set, *test_set;
+static image_data *train_set, *test_set;
 static unsigned int train_cnt, test_cnt;
 
-// Define layers of CNN
+// Define layers of CNN (4 output classes: Belts, Keyboard, Shoes, Watch)
 static Layer l_input(0, 0, 28*28);
 static Layer l_c1(5*5, 6, 24*24*6);
 static Layer l_s1(4*4, 1, 6*6*6);
-static Layer l_f(6*6*6, 10, 10);
+static Layer l_f(6*6*6, 4, 4);
 
 static void learn();
 static unsigned int classify(double data[28][28]);
@@ -37,10 +35,19 @@ float vectorNorm(float* vec, int n) {
 
 static inline void loaddata()
 {
-	mnist_load("data/train-images.idx3-ubyte", "data/train-labels.idx1-ubyte",
-		&train_set, &train_cnt);
-	mnist_load("data/t10k-images.idx3-ubyte", "data/t10k-labels.idx1-ubyte",
-		&test_set, &test_cnt);
+	image_data *all_data;
+	unsigned int total_count;
+	
+	// Load all images from the four categories
+	if (load_custom_dataset(&all_data, &total_count, "data") != 0) {
+		fprintf(stderr, "Failed to load dataset\n");
+		exit(1);
+	}
+	
+	// Split into train and test sets (80/20 split)
+	split_dataset(all_data, total_count, &train_set, &train_cnt, &test_set, &test_cnt);
+	
+	free(all_data);
 }
 
 int main(int argc, const char **argv) {
@@ -102,8 +109,8 @@ static double forward_pass(double data[28][28]) {
 
  // forward pass Fully Connected Layer
    
-    fp_preact_f((float (*)[6][6])l_s1.output, l_f.preact, (float (*)[6][6][6])l_f.weight);
-    fp_bias_f(l_f.preact, l_f.bias);
+    fp_preact_f((float (*)[6][6])l_s1.output, l_f.preact, l_f.weight, l_f.N);
+    fp_bias_f(l_f.preact, l_f.bias, l_f.N);
     apply_step_function(l_f.preact, l_f.output, l_f.O);
     
     double end_1 = omp_get_wtime();
@@ -113,10 +120,10 @@ static double forward_pass(double data[28][28]) {
 static double back_pass() {
     double start_1 = omp_get_wtime();
    
-    bp_weight_f((float (*)[6][6][6])l_f.d_weight, l_f.d_preact, (float (*)[6][6])l_s1.output);
-    bp_bias_f(l_f.bias, l_f.d_preact);
+    bp_weight_f(l_f.d_weight, l_f.d_preact, (float (*)[6][6])l_s1.output, l_f.N);
+    bp_bias_f(l_f.bias, l_f.d_preact, l_f.N);
  
-    bp_output_s1((float (*)[6][6])l_s1.d_output, (float (*)[6][6][6])l_f.weight, l_f.d_preact);
+    bp_output_s1((float (*)[6][6])l_s1.d_output, l_f.weight, l_f.d_preact, l_f.N);
     bp_preact_s1((float (*)[6][6])l_s1.d_preact, (float (*)[6][6])l_s1.d_output, (float (*)[6][6])l_s1.preact);
     bp_weight_s1((float (*)[4][4])l_s1.d_weight, (float (*)[6][6])l_s1.d_preact, (float (*)[24][24])l_c1.output);
     bp_bias_s1(l_s1.bias, (float (*)[6][6])l_s1.d_preact);
@@ -136,7 +143,7 @@ static double back_pass() {
 
 static void learn() {
     float err;
-	int iter = 1;
+	int iter = 150;  // Increased to 150 epochs for high accuracy
 	
 	double time_taken = 0.0;
 
@@ -156,8 +163,8 @@ static void learn() {
 			l_c1.bp_clear();
 
             // Euclid distance of train_set[i]
-    makeError(l_f.d_preact, l_f.output, train_set[i].label, 10);
-            tmp_err = vectorNorm(l_f.d_preact, 10);
+    makeError(l_f.d_preact, l_f.output, train_set[i].label, 4);
+            tmp_err = vectorNorm(l_f.d_preact, 4);
             err += tmp_err;
            time_taken += back_pass();
         }
@@ -177,13 +184,13 @@ static void learn() {
 }
 
 static unsigned int classify(double data[28][28]) {
-    float res[10];
+    float res[4];
     forward_pass(data);
     unsigned int max = 0;
-   for (int i = 0; i < 10; i++) {
+   for (int i = 0; i < 4; i++) {
         res[i] = l_f.output[i];
     }
-    for (int i = 1; i < 10; ++i) {
+    for (int i = 1; i < 4; ++i) {
         if (res[max] < res[i]) {
             max = i;
         }

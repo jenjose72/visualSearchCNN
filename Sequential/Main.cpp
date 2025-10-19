@@ -1,6 +1,4 @@
-#define USE_MNIST_LOADER
-#define MNIST_DOUBLE
-#include "mnist.h" 
+#include "image_loader.h" 
 #include "layer.h"
 #include <cstdio>
 #include <ctime>
@@ -10,14 +8,14 @@
 #include <time.h>
     double total_convolution_time = 0, total_pooling_time = 0, total_fully_connected_time = 0,total_gradient_time=0;
 
-static mnist_data *train_set, *test_set;
+static image_data *train_set, *test_set;
 static unsigned int train_cnt, test_cnt;
 
-// Define layers of CNN
+// Define layers of CNN (4 output classes: Belts, Keyboard, Shoes, Watch)
 static Layer l_input(0, 0, 28*28);
 static Layer l_c1(5*5, 6, 24*24*6);
 static Layer l_s1(4*4, 1, 6*6*6);
-static Layer l_f(6*6*6, 10, 10);
+static Layer l_f(6*6*6, 4, 4);
 
 static void learn();
 static unsigned int classify(double data[28][28]);
@@ -33,12 +31,45 @@ float vectorNorm(float* vec, int n) {
     return sqrt(sum);
 }
 
+// Simple data augmentation: add random noise
+void augment_image(double original[28][28], double augmented[28][28], float noise_level = 0.05f) {
+    for (int i = 0; i < 28; ++i) {
+        for (int j = 0; j < 28; ++j) {
+            // Add small random noise
+            float noise = (static_cast<float>(rand()) / RAND_MAX - 0.5f) * noise_level;
+            augmented[i][j] = original[i][j] + noise;
+            
+            // Clamp to [0, 1]
+            if (augmented[i][j] < 0.0) augmented[i][j] = 0.0;
+            if (augmented[i][j] > 1.0) augmented[i][j] = 1.0;
+        }
+    }
+}
+
+// Horizontal flip augmentation
+void flip_horizontal(double original[28][28], double flipped[28][28]) {
+    for (int i = 0; i < 28; ++i) {
+        for (int j = 0; j < 28; ++j) {
+            flipped[i][27 - j] = original[i][j];
+        }
+    }
+}
+
 static inline void loaddata()
 {
-	mnist_load("data/train-images.idx3-ubyte", "data/train-labels.idx1-ubyte",
-		&train_set, &train_cnt);
-	mnist_load("data/t10k-images.idx3-ubyte", "data/t10k-labels.idx1-ubyte",
-		&test_set, &test_cnt);
+	image_data *all_data;
+	unsigned int total_count;
+	
+	// Load all images from the four categories
+	if (load_custom_dataset(&all_data, &total_count, "data") != 0) {
+		fprintf(stderr, "Failed to load dataset\n");
+		exit(1);
+	}
+	
+	// Split into train and test sets (80/20 split)
+	split_dataset(all_data, total_count, &train_set, &train_cnt, &test_set, &test_cnt);
+	
+	free(all_data);
 }
 
 int main(int argc, const char **argv) {
@@ -94,8 +125,8 @@ static double forward_pass(double data[28][28]) {
 
  // forward pass Fully Connected Layer
     start = clock();
-    fp_preact_f((float (*)[6][6])l_s1.output, l_f.preact, (float (*)[6][6][6])l_f.weight);
-    fp_bias_f(l_f.preact, l_f.bias);
+    fp_preact_f((float (*)[6][6])l_s1.output, l_f.preact, l_f.weight, l_f.N);
+    fp_bias_f(l_f.preact, l_f.bias, l_f.N);
     apply_step_function(l_f.preact, l_f.output, l_f.O);
     end = clock();
     milliseconds = 1000.0 * (end - start) / CLOCKS_PER_SEC;
@@ -111,13 +142,13 @@ static double back_pass() {
    
  float milliseconds=0;
 start = clock();
-    bp_weight_f((float (*)[6][6][6])l_f.d_weight, l_f.d_preact, (float (*)[6][6])l_s1.output);
-    bp_bias_f(l_f.bias, l_f.d_preact);
+    bp_weight_f(l_f.d_weight, l_f.d_preact, (float (*)[6][6])l_s1.output, l_f.N);
+    bp_bias_f(l_f.bias, l_f.d_preact, l_f.N);
    end = clock();
     milliseconds = 1000.0 * (end - start) / CLOCKS_PER_SEC;
     total_fully_connected_time += milliseconds;
     start = clock();
-    bp_output_s1((float (*)[6][6])l_s1.d_output, (float (*)[6][6][6])l_f.weight, l_f.d_preact);
+    bp_output_s1((float (*)[6][6])l_s1.d_output, l_f.weight, l_f.d_preact, l_f.N);
     bp_preact_s1((float (*)[6][6])l_s1.d_preact, (float (*)[6][6])l_s1.d_output, (float (*)[6][6])l_s1.preact);
     bp_weight_s1((float (*)[4][4])l_s1.d_weight, (float (*)[6][6])l_s1.d_preact, (float (*)[24][24])l_c1.output);
     bp_bias_s1(l_s1.bias, (float (*)[6][6])l_s1.d_preact);
@@ -145,33 +176,57 @@ end_1= clock();
 
 static void learn() {
     float err;
-	int iter = 1;
+	int total_epochs = 150;  // Total epochs for high accuracy
+	int iter = total_epochs;
+	int current_epoch = 0;
 	
 	double time_taken = 0.0;
     fprintf(stdout ,"Visual Search Using CNN\n 2023BCS0017 - Jen Jose Jeeson\n 2023BCS0053 - Jefin Francis\n");
-	fprintf(stdout ,"Learning\n");
+	fprintf(stdout ,"Learning with %d epochs and adaptive learning rate\n", total_epochs);
 
 	while (iter < 0 || iter-- > 0) {
+		current_epoch++;
+		
+		// Update learning rate with decay
+		update_learning_rate(current_epoch, total_epochs);
+		
 		err = 0.0f;
 
 		for (int i = 0; i < train_cnt; ++i) {
 			float tmp_err;
-
-			time_taken += forward_pass(train_set[i].data);
+			
+			// Randomly augment data (50% chance)
+			double augmented_data[28][28];
+			if (rand() % 2 == 0 && current_epoch > 10) {  // Start augmentation after 10 epochs
+				if (rand() % 2 == 0) {
+					augment_image(train_set[i].data, augmented_data, 0.05f);
+				} else {
+					flip_horizontal(train_set[i].data, augmented_data);
+				}
+				time_taken += forward_pass(augmented_data);
+			} else {
+				time_taken += forward_pass(train_set[i].data);
+			}
 
 			l_f.bp_clear();
 			l_s1.bp_clear();
 			l_c1.bp_clear();
 
             // Euclid distance of train_set[i]
-    makeError(l_f.d_preact, l_f.output, train_set[i].label, 10);
-            tmp_err = vectorNorm(l_f.d_preact, 10);
+    makeError(l_f.d_preact, l_f.output, train_set[i].label, 4);
+            tmp_err = vectorNorm(l_f.d_preact, 4);
             err += tmp_err;
            time_taken += back_pass();
         }
 
         err /= train_cnt;
-		fprintf(stdout, "error: %e, time_on_cpu: %lf\n", err, time_taken);
+		
+		// Print progress every 10 epochs or if error is very low
+		if (current_epoch % 10 == 0 || current_epoch == 1 || err < 0.15) {
+			extern float dt;  // Access current learning rate
+			fprintf(stdout, "Epoch %3d/%d - error: %.6f, lr: %.6f, time: %.2lf s\n", 
+					current_epoch, total_epochs, err, dt, time_taken);
+		}
 
 		if (err < threshold) {
 			fprintf(stdout, "Training complete, error less than threshold\n\n");
@@ -184,13 +239,13 @@ static void learn() {
 }
 
 static unsigned int classify(double data[28][28]) {
-    float res[10];
+    float res[4];
     forward_pass(data);
     unsigned int max = 0;
-   for (int i = 0; i < 10; i++) {
+   for (int i = 0; i < 4; i++) {
         res[i] = l_f.output[i];
     }
-    for (int i = 1; i < 10; ++i) {
+    for (int i = 1; i < 4; ++i) {
         if (res[max] < res[i]) {
             max = i;
         }
