@@ -10,8 +10,19 @@
 #define LAYER_H
 #endif
 
-const static float dt = 5.0E-02f;  // Reduced learning rate from 0.1 to 0.05 for more stable training
+static float dt = 5.0E-02f;  // Initial learning rate (will decay over time)
 const static float threshold = 1.0E-02f;
+
+// Function to update learning rate with decay
+void update_learning_rate(int epoch, int total_epochs) {
+    // Learning rate decay: reduce by factor over time
+    float initial_lr = 5.0E-02f;
+    float decay_factor = 0.95f;  // Decay by 5% each epoch
+    dt = initial_lr * pow(decay_factor, epoch);
+    
+    // Ensure learning rate doesn't get too small
+    if (dt < 1.0E-04f) dt = 1.0E-04f;
+}
 
 class Layer {
 	public:

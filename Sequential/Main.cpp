@@ -6,6 +6,8 @@
 #include <cmath>
 #include <memory>
 #include <time.h>
+#include <algorithm>
+#include <random>
     double total_convolution_time = 0, total_pooling_time = 0, total_fully_connected_time = 0,total_gradient_time=0;
 
 static image_data *train_set, *test_set;
@@ -176,7 +178,7 @@ end_1= clock();
 
 static void learn() {
     float err;
-	int total_epochs = 150;  // Total epochs for high accuracy
+	int total_epochs = 80;  // Total epochs for high accuracy
 	int iter = total_epochs;
 	int current_epoch = 0;
 	
@@ -192,28 +194,33 @@ static void learn() {
 		
 		err = 0.0f;
 
-		for (int i = 0; i < train_cnt; ++i) {
+		// Shuffle training indices for randomization
+		std::vector<int> indices(train_cnt);
+		for(int i = 0; i < train_cnt; ++i) indices[i] = i;
+		std::shuffle(indices.begin(), indices.end(), std::default_random_engine(time(NULL) + current_epoch));
+
+		for (int idx : indices) {
 			float tmp_err;
 			
 			// Randomly augment data (50% chance)
 			double augmented_data[28][28];
 			if (rand() % 2 == 0 && current_epoch > 10) {  // Start augmentation after 10 epochs
 				if (rand() % 2 == 0) {
-					augment_image(train_set[i].data, augmented_data, 0.05f);
+					augment_image(train_set[idx].data, augmented_data, 0.05f);
 				} else {
-					flip_horizontal(train_set[i].data, augmented_data);
+					flip_horizontal(train_set[idx].data, augmented_data);
 				}
 				time_taken += forward_pass(augmented_data);
 			} else {
-				time_taken += forward_pass(train_set[i].data);
+				time_taken += forward_pass(train_set[idx].data);
 			}
 
 			l_f.bp_clear();
 			l_s1.bp_clear();
 			l_c1.bp_clear();
 
-            // Euclid distance of train_set[i]
-    makeError(l_f.d_preact, l_f.output, train_set[i].label, 3);
+            // Euclid distance of train_set[idx]
+    makeError(l_f.d_preact, l_f.output, train_set[idx].label, 3);
             tmp_err = vectorNorm(l_f.d_preact, 3);
             err += tmp_err;
            time_taken += back_pass();

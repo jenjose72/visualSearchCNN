@@ -8,6 +8,8 @@
 #include <time.h>
 #include <cstring>
 #include <cstdlib>
+#include <algorithm>
+#include <random>
 #include <omp.h>
     
 static image_data *train_set, *test_set;
@@ -31,6 +33,30 @@ float vectorNorm(float* vec, int n) {
         sum += vec[i] * vec[i];
     }
     return sqrt(sum);
+}
+
+// Simple data augmentation: add random noise
+void augment_image(double original[28][28], double augmented[28][28], float noise_level = 0.05f) {
+    for (int i = 0; i < 28; ++i) {
+        for (int j = 0; j < 28; ++j) {
+            // Add small random noise
+            float noise = (static_cast<float>(rand()) / RAND_MAX - 0.5f) * noise_level;
+            augmented[i][j] = original[i][j] + noise;
+            
+            // Clamp to [0, 1]
+            if (augmented[i][j] < 0.0) augmented[i][j] = 0.0;
+            if (augmented[i][j] > 1.0) augmented[i][j] = 1.0;
+        }
+    }
+}
+
+// Horizontal flip augmentation
+void flip_horizontal(double original[28][28], double flipped[28][28]) {
+    for (int i = 0; i < 28; ++i) {
+        for (int j = 0; j < 28; ++j) {
+            flipped[i][27 - j] = original[i][j];
+        }
+    }
 }
 
 static inline void loaddata()
@@ -143,35 +169,62 @@ static double back_pass() {
 
 static void learn() {
     float err;
-	int iter = 150;  // Increased to 150 epochs for high accuracy
+	int total_epochs = 80;  // Total epochs for high accuracy
+	int iter = total_epochs;
+	int current_epoch = 0;
 	
 	double time_taken = 0.0;
-
     fprintf(stdout ,"Visual Search Using CNN\n 2023BCS0017 - Jen Jose Jeeson\n 2023BCS0053 - Jefin Francis\n");
-	fprintf(stdout ,"Learning\n");
+	fprintf(stdout ,"Learning with %d epochs and adaptive learning rate (OpenMP)\n", total_epochs);
 
 	while (iter < 0 || iter-- > 0) {
+		current_epoch++;
+		
+		// Update learning rate with decay
+		update_learning_rate(current_epoch, total_epochs);
+		
 		err = 0.0f;
 
-		for (int i = 0; i < train_cnt; ++i) {
-			float tmp_err;
+		// Shuffle training indices for randomization
+		std::vector<int> indices(train_cnt);
+		for(int i = 0; i < train_cnt; ++i) indices[i] = i;
+		std::shuffle(indices.begin(), indices.end(), std::default_random_engine(time(NULL) + current_epoch));
 
-			time_taken += forward_pass(train_set[i].data);
+		for (int idx : indices) {
+			float tmp_err;
+			
+			// Randomly augment data (50% chance)
+			double augmented_data[28][28];
+			if (rand() % 2 == 0 && current_epoch > 10) {  // Start augmentation after 10 epochs
+				if (rand() % 2 == 0) {
+					augment_image(train_set[idx].data, augmented_data, 0.05f);
+				} else {
+					flip_horizontal(train_set[idx].data, augmented_data);
+				}
+				time_taken += forward_pass(augmented_data);
+			} else {
+				time_taken += forward_pass(train_set[idx].data);
+			}
 
 			l_f.bp_clear();
 			l_s1.bp_clear();
 			l_c1.bp_clear();
 
-            // Euclid distance of train_set[i]
-    makeError(l_f.d_preact, l_f.output, train_set[i].label, 3);
+            // Euclid distance of train_set[idx]
+    makeError(l_f.d_preact, l_f.output, train_set[idx].label, 3);
             tmp_err = vectorNorm(l_f.d_preact, 3);
             err += tmp_err;
            time_taken += back_pass();
         }
 
-    err /= train_cnt;
-    double avg_time = (train_cnt > 0) ? (time_taken / train_cnt) : 0.0;
-    fprintf(stdout, "error: %e, total_time(s): %lf, avg_time_per_sample(s): %lf\n", err, time_taken, avg_time);
+        err /= train_cnt;
+		
+		// Print progress every 10 epochs or if error is very low
+		if (current_epoch % 10 == 0 || current_epoch == 1 || err < 0.15) {
+			extern float dt;  // Access current learning rate
+			fprintf(stdout, "Epoch %3d/%d - error: %.6f, lr: %.6f, time: %.2lf s\n", 
+					current_epoch, total_epochs, err, dt, time_taken);
+		}
 
 		if (err < threshold) {
 			fprintf(stdout, "Training complete, error less than threshold\n\n");
@@ -180,7 +233,7 @@ static void learn() {
 
 	}
 	
-    fprintf(stdout, "\n Total training time (s): %lf\n", time_taken);
+	fprintf(stdout, "\n Time - %lf\n", time_taken);
 }
 
 static unsigned int classify(double data[28][28]) {
