@@ -11,11 +11,11 @@
 static image_data *train_set, *test_set;
 static unsigned int train_cnt, test_cnt;
 
-// Define layers of CNN (4 output classes: Belts, Keyboard, Shoes, Watch)
+// Define layers of CNN (3 output classes: Belts, Shoes, Watch)
 static Layer l_input(0, 0, 28*28);
 static Layer l_c1(5*5, 6, 24*24*6);
 static Layer l_s1(4*4, 1, 6*6*6);
-static Layer l_f(6*6*6, 4, 4);
+static Layer l_f(6*6*6, 3, 3);
 
 static void learn();
 static unsigned int classify(double data[28][28]);
@@ -213,8 +213,8 @@ static void learn() {
 			l_c1.bp_clear();
 
             // Euclid distance of train_set[i]
-    makeError(l_f.d_preact, l_f.output, train_set[i].label, 4);
-            tmp_err = vectorNorm(l_f.d_preact, 4);
+    makeError(l_f.d_preact, l_f.output, train_set[i].label, 3);
+            tmp_err = vectorNorm(l_f.d_preact, 3);
             err += tmp_err;
            time_taken += back_pass();
         }
@@ -239,13 +239,13 @@ static void learn() {
 }
 
 static unsigned int classify(double data[28][28]) {
-    float res[4];
+    float res[3];
     forward_pass(data);
     unsigned int max = 0;
-   for (int i = 0; i < 4; i++) {
+   for (int i = 0; i < 3; i++) {
         res[i] = l_f.output[i];
     }
-    for (int i = 1; i < 4; ++i) {
+    for (int i = 1; i < 3; ++i) {
         if (res[max] < res[i]) {
             max = i;
         }

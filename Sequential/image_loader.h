@@ -147,7 +147,7 @@ static int load_images_from_directory(const char *dir_path, unsigned int label,
     return loaded_count;
 }
 
-/* Load all images from the four categories */
+/* Load all images from the three categories */
 static int load_custom_dataset(image_data **data, unsigned int *count, 
                                const char *base_path = "data") {
     std::vector<image_data> dataset;
@@ -159,19 +159,16 @@ static int load_custom_dataset(image_data **data, unsigned int *count,
     int belts_count = load_images_from_directory(dir_path, 0, dataset);
     fprintf(stdout, "Loaded %d images from Belts\n", belts_count);
     
-    // Load Keyboard (label 1)
-    snprintf(dir_path, sizeof(dir_path), "%s/Keyboard", base_path);
-    int keyboard_count = load_images_from_directory(dir_path, 1, dataset);
-    fprintf(stdout, "Loaded %d images from Keyboard\n", keyboard_count);
+    // Keyboard removed - skipping label 1
     
-    // Load Shoes (label 2)
+    // Load Shoes (label 1, was 2)
     snprintf(dir_path, sizeof(dir_path), "%s/Shoes", base_path);
-    int shoes_count = load_images_from_directory(dir_path, 2, dataset);
+    int shoes_count = load_images_from_directory(dir_path, 1, dataset);
     fprintf(stdout, "Loaded %d images from Shoes\n", shoes_count);
     
-    // Load Watch (label 3)
+    // Load Watch (label 2, was 3)
     snprintf(dir_path, sizeof(dir_path), "%s/Watch", base_path);
-    int watch_count = load_images_from_directory(dir_path, 3, dataset);
+    int watch_count = load_images_from_directory(dir_path, 2, dataset);
     fprintf(stdout, "Loaded %d images from Watch\n", watch_count);
     
     *count = dataset.size();
