@@ -1,75 +1,156 @@
-# Visual Search CNN - Custom Dataset Support
+# Visual Search CNN (Sequential + OpenMP)
 
-## Changes Made
+End-to-end image classifier for 3 product classes using a tiny CNN, with both sequential and OpenMP-accelerated implementations.
 
-### Overview
-The project has been updated to work with a custom image dataset (Belts, Keyboard, Shoes, Watch) instead of the MNIST ubyte files.
+- Classes: Belts (0), Shoes (1), Watch (2)
+- Input: 28×28 grayscale (images are auto-loaded and resized)
+- Dataset: Loaded from `data/` and split 80/20 (train/test)
+- Extras: Learning-rate decay, data shuffling, optional data augmentation, save/load model, single-image classification
 
-### Key Changes
+## Directory layout
 
-1. **New Image Loader (`image_loader.h`)**
-   - Replaces the MNIST loader
-   - Uses STB image libraries for loading various image formats (JPEG, PNG, WebP)
-   - Automatically loads images from 4 categories:
-     - Belts (label 0)
-     - Keyboard (label 1)
-     - Shoes (label 2)
-     - Watch (label 3)
-   - Resizes all images to 28x28 grayscale
-   - Normalizes pixel values to [0, 1]
-   - Automatically splits dataset into 80% training, 20% testing
+```
+Sequential/   # Single-threaded implementation
+Openmp/       # OpenMP-accelerated implementation
+data/         # Dataset folders (see below)
+```
 
-2. **Network Architecture Updates**
-   - Changed output layer from 10 classes (MNIST digits) to 4 classes (product categories)
-   - Updated fully connected layer: `Layer l_f(6*6*6, 4, 4);`
-   - Modified all function calls to support variable output sizes
+## Dataset
 
-3. **Layer Functions Updated**
-   - `fp_preact_f()`, `fp_bias_f()`, `bp_weight_f()`, `bp_bias_f()`, `bp_output_s1()` now accept `num_outputs` parameter
-   - Functions are now flexible and can work with any number of output classes
+Place your images under `data/` like this. Supported formats: jpg, jpeg, png, webp. Images are converted to grayscale and resized to 28×28 automatically.
 
-4. **Both Implementations Updated**
-   - **Sequential** (`Sequential/Main.cpp`, `Sequential/layer.h`)
-   - **OpenMP** (`Openmp/Main.cpp`, `Openmp/layer.h`)
-
-### Dependencies Added
-- `stb_image.h` - For loading various image formats
-- `stb_image_resize2.h` - For resizing images to 28x28
-
-### Dataset Structure
 ```
 data/
-├── Belts/       (images: .jpg, .jpeg, .png, .webp)
-├── Keyboard/    (images: .jpg, .jpeg, .png, .webp)
-├── Shoes/       (images: .jpg, .jpeg, .png, .webp)
-└── Watch/       (images: .jpg, .jpeg, .png, .webp)
+├── Belts/
+├── Shoes/
+└── Watch/
 ```
 
-### How to Compile and Run
+The loader will print how many images it found per class and the final train/test split.
 
-#### Sequential Version
+## Build (Linux, g++)
+
+You only need a C++11 compiler. STB headers (`stb_image.h`, `stb_image_resize2.h`) are already in the repo. No OpenCV required.
+
+### Sequential
 ```bash
 cd Sequential
-g++ -O3 -std=c++11 Main.cpp -o cnn_sequential
-./cnn_sequential
+g++ -O3 -std=c++11 Main.cpp -o cnn_sequential -lm
 ```
 
-#### OpenMP Version
+### OpenMP
 ```bash
 cd Openmp
-g++ -O3 -std=c++11 -fopenmp Main.cpp -o cnn_openmp
-./cnn_openmp -t 4    # Use 4 threads
+g++ -O3 -std=c++11 -fopenmp Main.cpp -o cnn_openmp -lm
 ```
 
-### Output
-- Loads all images from the 4 categories
-- Displays count of images loaded from each category
-- Shows total train/test split
-- Performs CNN training on the custom dataset
-- Reports error rate on test set
+## Train
 
-### Notes
-- Images are automatically converted to grayscale
-- All images are resized to 28x28 to match CNN input layer
-- The dataset is shuffled before splitting into train/test
-- Training uses the same parameters as original MNIST implementation
+Training uses 80 epochs by default with learning rate decay and random shuffling each epoch.
+
+### Sequential (train and evaluate)
+```bash
+./Sequential/cnn_sequential
+```
+
+### OpenMP (train with N threads and evaluate)
+```bash
+./Openmp/cnn_openmp -t 8   # use 8 threads (or omit -t to use the default)
+```
+
+During training, you’ll see epoch progress with error and current learning rate. At the end, a confusion matrix and accuracy are printed.
+
+## Save / Load model
+
+Both builds can save weights after training and reload them later to avoid retraining.
+
+- Default model file names:
+   - Sequential: `cnn_model.bin`
+   - OpenMP: `cnn_model_omp.bin` (you can load the sequential model too)
+
+### Train and save (default file)
+```bash
+./Sequential/cnn_sequential
+./Openmp/cnn_openmp -t 8
+```
+
+### Load saved model (skip training)
+```bash
+./Sequential/cnn_sequential --load
+./Openmp/cnn_openmp --load
+```
+
+### Use a custom model file
+```bash
+./Sequential/cnn_sequential --model my_model.bin
+./Openmp/cnn_openmp --load --model cnn_model.bin
+```
+
+## Classify a single custom image (no dataset required)
+
+You can classify any single image without loading the dataset.
+
+### Sequential
+```bash
+# Fast: load model, classify one image, skip dataset and test set
+./Sequential/cnn_sequential --load -i ~/Downloads/my_image.jpg --no-test
+```
+
+### OpenMP
+```bash
+# Fast: if --load and -i are provided together, dataset is skipped
+./Openmp/cnn_openmp --load -i ~/Downloads/my_image.jpg
+
+# Optional: also specify threads
+./Openmp/cnn_openmp --load -i ~/Downloads/my_image.jpg -t 8
+```
+
+The output shows the predicted class and confidence scores for Belts/Shoes/Watch.
+
+## Full CLI reference
+
+### Sequential
+- `--load, -l`        Load a saved model (skip training)
+- `--model, -m <f>`   Use custom model file (default: `cnn_model.bin`)
+- `--test-image, -i`  Classify a single image (auto-resize to 28×28)
+- `--no-test`         Skip validation testing (useful with `--load -i`)
+- `--help, -h`        Show usage
+
+### OpenMP
+- `-t, --threads <N>` Set number of threads
+- `--load, -l`        Load a saved model (skip training)
+- `--model, -m <f>`   Use custom model file (default: `cnn_model_omp.bin`)
+- `--test-image, -i`  Classify a single image (auto-resize to 28×28)
+- `--help, -h`        Show usage and examples
+
+Notes:
+- For OpenMP, if you pass `--load` and `-i` together, the program skips loading the dataset and immediately classifies your image.
+- OpenMP will print the number of threads it’s using. You can also set `OMP_NUM_THREADS` in the environment.
+
+## Tips & troubleshooting
+
+- If accuracy is low:
+   - Ensure classes are balanced and images are reasonably clear.
+   - Let it train for all 80 epochs at least once to produce a good `cnn_model.bin`.
+   - The code performs shuffling every epoch and applies light augmentation after epoch 10.
+- If the executable is missing:
+   - Double-check you compiled to `cnn_sequential` / `cnn_openmp` in the corresponding folders.
+- If you only want to classify one image quickly:
+   - Sequential: `--load -i <img> --no-test`
+   - OpenMP: `--load -i <img>` (dataset is skipped automatically)
+
+## Example session
+
+```bash
+# Train sequential and save model
+./Sequential/cnn_sequential
+
+# Classify one image quickly using the saved model
+./Sequential/cnn_sequential --load -i ~/Downloads/belts1.jpg --no-test
+
+# Train OpenMP with 12 threads, then classify one image
+./Openmp/cnn_openmp -t 12
+./Openmp/cnn_openmp --load -i ~/Downloads/belts1.jpg
+```
+
+That’s it—compile, train, and classify with either build. Have fun experimenting!

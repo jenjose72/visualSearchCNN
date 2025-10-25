@@ -8,6 +8,7 @@
 #include <time.h>
 #include <algorithm>
 #include <random>
+#include <cstring>
     double total_convolution_time = 0, total_pooling_time = 0, total_fully_connected_time = 0,total_gradient_time=0;
 
 static image_data *train_set, *test_set;
@@ -24,6 +25,9 @@ static unsigned int classify(double data[28][28]);
 static void test();
 static double forward_pass(double data[28][28]);
 static double back_pass();
+static void save_model(const char* filename);
+static bool load_model(const char* filename);
+static void test_single_image(double data[28][28]);
 
 float vectorNorm(float* vec, int n) {
     float sum = 0.0f;
@@ -75,13 +79,86 @@ static inline void loaddata()
 }
 
 int main(int argc, const char **argv) {
+    const char* model_file = "cnn_model.bin";
+    bool skip_training = false;
+    double custom_image[28][28];
+    bool test_custom = false;
+    bool run_full_test = true;
     
     srand(time(NULL));
+    
+    // Parse command line arguments first
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--load") == 0 || strcmp(argv[i], "-l") == 0) {
+            skip_training = true;
+        } else if (strcmp(argv[i], "--model") == 0 || strcmp(argv[i], "-m") == 0) {
+            if (i + 1 < argc) {
+                model_file = argv[++i];
+            }
+        } else if (strcmp(argv[i], "--test-image") == 0 || strcmp(argv[i], "-i") == 0) {
+            if (i + 1 < argc) {
+                const char* image_path = argv[++i];
+                if (load_single_image(image_path, custom_image) == 0) {
+                    test_custom = true;
+                    fprintf(stdout, "\n=== Testing Custom Image ===\n");
+                    fprintf(stdout, "Image: %s\n", image_path);
+                } else {
+                    fprintf(stderr, "Failed to load image: %s\n", image_path);
+                    return 1;
+                }
+            }
+        } else if (strcmp(argv[i], "--no-test") == 0) {
+            run_full_test = false;
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("Usage: %s [OPTIONS]\n", argv[0]);
+            printf("Options:\n");
+            printf("  --load, -l              Load pre-trained model instead of training\n");
+            printf("  --model, -m <file>      Specify model file (default: cnn_model.bin)\n");
+            printf("  --test-image, -i <file> Test a single custom image\n");
+            printf("  --no-test               Skip validation dataset testing\n");
+            printf("  --help, -h              Show this help message\n");
+            printf("\nExample: ./cnn_sequential --load -i myimage.jpg --no-test\n");
+            return 0;
+        }
+    }
+    
+    // If just testing a custom image with loaded model, skip dataset loading
+    if (skip_training && test_custom && !run_full_test) {
+        if (load_model(model_file)) {
+            fprintf(stdout, "Model loaded from %s\n\n", model_file);
+            test_single_image(custom_image);
+            return 0;
+        } else {
+            fprintf(stderr, "Failed to load model from %s\n", model_file);
+            return 1;
+        }
+    }
+    
+    // Load dataset only if we need to train or run full test
     loaddata();
-    learn();
-    test();
+    
+    // Try to load existing model or train new one
+    if (skip_training && load_model(model_file)) {
+        fprintf(stdout, "Using pre-trained model from %s\n\n", model_file);
+    } else {
+        if (skip_training) {
+            fprintf(stdout, "Could not load model, training new model...\n\n");
+        }
+        learn();
+        save_model(model_file);
+    }
+    
+    // Test on custom image if provided
+    if (test_custom) {
+        test_single_image(custom_image);
+    }
+    
+    // Run full test if requested
+    if (run_full_test) {
+        test();
+    }
 
-    printf("Total Convolution Time: %f ms\n", total_convolution_time);
+    printf("\nTotal Convolution Time: %f ms\n", total_convolution_time);
     printf("Total Pooling Time: %f ms\n", total_pooling_time);
     printf("Total Fully Connected Time: %f ms\n", total_fully_connected_time);
     printf("Total Time on applying gradients: %f ms\n", total_gradient_time);
@@ -264,13 +341,128 @@ static unsigned int classify(double data[28][28]) {
 static void test()
 {
 	int error = 0;
+	const char* class_names[] = {"Belts", "Shoes", "Watch"};
+	int confusion_matrix[3][3] = {0}; // [actual][predicted]
 
 	for (int i = 0; i < test_cnt; ++i) {
-		if (classify(test_set[i].data) != test_set[i].label) {
+		unsigned int predicted = classify(test_set[i].data);
+		unsigned int actual = test_set[i].label;
+		
+		confusion_matrix[actual][predicted]++;
+		
+		if (predicted != actual) {
 			++error;
 		}
 	}
 
-	fprintf(stdout, "Error Rate: %.2lf%%\n",
+	fprintf(stdout, "\n=== Test Results ===\n");
+	fprintf(stdout, "Total Test Samples: %d\n", test_cnt);
+	fprintf(stdout, "Correct: %d\n", test_cnt - error);
+	fprintf(stdout, "Incorrect: %d\n", error);
+	fprintf(stdout, "Accuracy: %.2lf%%\n", 
+		(1.0 - double(error) / double(test_cnt)) * 100.0);
+	fprintf(stdout, "Error Rate: %.2lf%%\n\n",
 		double(error) / double(test_cnt) * 100.0);
+	
+	fprintf(stdout, "Confusion Matrix:\n");
+	fprintf(stdout, "Actual\\Predicted   Belts  Shoes  Watch\n");
+	fprintf(stdout, "----------------------------------------\n");
+	for (int i = 0; i < 3; i++) {
+		fprintf(stdout, "%-15s", class_names[i]);
+		for (int j = 0; j < 3; j++) {
+			fprintf(stdout, "%7d", confusion_matrix[i][j]);
+		}
+		fprintf(stdout, "\n");
+	}
+	fprintf(stdout, "===================\n");
+}
+
+// Save model weights to file
+static void save_model(const char* filename) {
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
+        fprintf(stderr, "Failed to open file for writing: %s\n", filename);
+        return;
+    }
+    
+    // Save convolution layer weights and biases
+    fwrite(l_c1.weight, sizeof(float), l_c1.M * l_c1.N, file);
+    fwrite(l_c1.bias, sizeof(float), l_c1.N, file);
+    
+    // Save pooling layer weights and biases
+    fwrite(l_s1.weight, sizeof(float), l_s1.M * l_s1.N, file);
+    fwrite(l_s1.bias, sizeof(float), l_s1.N, file);
+    
+    // Save fully connected layer weights and biases
+    fwrite(l_f.weight, sizeof(float), l_f.M * l_f.N, file);
+    fwrite(l_f.bias, sizeof(float), l_f.N, file);
+    
+    fclose(file);
+    fprintf(stdout, "\nModel saved to %s\n", filename);
+}
+
+// Load model weights from file
+static bool load_model(const char* filename) {
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
+        return false;
+    }
+    
+    // Load convolution layer weights and biases
+    size_t read_count;
+    read_count = fread(l_c1.weight, sizeof(float), l_c1.M * l_c1.N, file);
+    if (read_count != l_c1.M * l_c1.N) {
+        fclose(file);
+        return false;
+    }
+    
+    read_count = fread(l_c1.bias, sizeof(float), l_c1.N, file);
+    if (read_count != l_c1.N) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load pooling layer weights and biases
+    read_count = fread(l_s1.weight, sizeof(float), l_s1.M * l_s1.N, file);
+    if (read_count != l_s1.M * l_s1.N) {
+        fclose(file);
+        return false;
+    }
+    
+    read_count = fread(l_s1.bias, sizeof(float), l_s1.N, file);
+    if (read_count != l_s1.N) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load fully connected layer weights and biases
+    read_count = fread(l_f.weight, sizeof(float), l_f.M * l_f.N, file);
+    if (read_count != l_f.M * l_f.N) {
+        fclose(file);
+        return false;
+    }
+    
+    read_count = fread(l_f.bias, sizeof(float), l_f.N, file);
+    if (read_count != l_f.N) {
+        fclose(file);
+        return false;
+    }
+    
+    fclose(file);
+    return true;
+}
+
+// Test a single custom image
+static void test_single_image(double data[28][28]) {
+    unsigned int prediction = classify(data);
+    
+    const char* class_names[] = {"Belts", "Shoes", "Watch"};
+    
+    fprintf(stdout, "\n=== Prediction Results ===\n");
+    fprintf(stdout, "Predicted class: %s (label %d)\n", class_names[prediction], prediction);
+    fprintf(stdout, "\nConfidence scores:\n");
+    for (int i = 0; i < 3; i++) {
+        fprintf(stdout, "  %s: %.4f\n", class_names[i], l_f.output[i]);
+    }
+    fprintf(stdout, "========================\n\n");
 }

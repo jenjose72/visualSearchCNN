@@ -26,6 +26,9 @@ static unsigned int classify(double data[28][28]);
 static void test();
 static double forward_pass(double data[28][28]);
 static double back_pass();
+static void save_model(const char* filename);
+static bool load_model(const char* filename);
+static void test_single_image(double data[28][28]);
 
 float vectorNorm(float* vec, int n) {
     float sum = 0.0f;
@@ -78,14 +81,38 @@ static inline void loaddata()
 
 int main(int argc, const char **argv) {
     int num_threads = 0;
+    const char* model_file = "cnn_model_omp.bin";
+    bool skip_training = false;
+    const char* test_image_path = nullptr;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--threads") == 0) {
             if (i + 1 < argc) {
                 num_threads = atoi(argv[++i]);
             }
+        } else if (strcmp(argv[i], "--load") == 0 || strcmp(argv[i], "-l") == 0) {
+            skip_training = true;
+        } else if (strcmp(argv[i], "--model") == 0 || strcmp(argv[i], "-m") == 0) {
+            if (i + 1 < argc) {
+                model_file = argv[++i];
+            }
+        } else if (strcmp(argv[i], "--test-image") == 0 || strcmp(argv[i], "-i") == 0) {
+            if (i + 1 < argc) {
+                test_image_path = argv[++i];
+            }
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            fprintf(stdout, "Usage: %s [-t N|--threads N]\n", argv[0]);
+            fprintf(stdout, "Usage: %s [OPTIONS]\n", argv[0]);
+            fprintf(stdout, "Options:\n");
+            fprintf(stdout, "  -t, --threads <N>           Set number of OpenMP threads\n");
+            fprintf(stdout, "  --load, -l                  Load pre-trained model instead of training\n");
+            fprintf(stdout, "  --model, -m <file>          Specify model file (default: cnn_model_omp.bin)\n");
+            fprintf(stdout, "  --test-image, -i <file>     Test a custom image and show prediction\n");
+            fprintf(stdout, "  --help, -h                  Show this help message\n");
+            fprintf(stdout, "\nExamples:\n");
+            fprintf(stdout, "  %s -t 8                                 # Train with 8 threads\n", argv[0]);
+            fprintf(stdout, "  %s --load -t 4                          # Load model, test with 4 threads\n", argv[0]);
+            fprintf(stdout, "  %s --load --test-image shoe.jpg         # Test custom image\n", argv[0]);
+            fprintf(stdout, "  %s -t 8 --test-image data/Shoes/s1.jpg  # Train and test custom image\n", argv[0]);
             return 0;
         } else if (argv[i][0] >= '0' && argv[i][0] <= '9') {
             /* allow a bare numeric positional argument */
@@ -101,8 +128,56 @@ int main(int argc, const char **argv) {
     }
 
     srand(time(NULL));
+    
+    // Check if we only need to test a custom image with a loaded model
+    bool only_test_image = skip_training && test_image_path != nullptr;
+    
+    // If just testing custom image, skip dataset loading
+    if (only_test_image) {
+        if (load_model(model_file)) {
+            fprintf(stdout, "Model loaded from %s\n\n", model_file);
+            double custom_data[28][28];
+            if (load_single_image(test_image_path, custom_data) == 0) {
+                fprintf(stdout, "=== Testing Custom Image ===\n");
+                fprintf(stdout, "Image: %s\n", test_image_path);
+                test_single_image(custom_data);
+                return 0;
+            } else {
+                fprintf(stderr, "Failed to load custom image: %s\n", test_image_path);
+                return 1;
+            }
+        } else {
+            fprintf(stderr, "Failed to load model from %s\n", model_file);
+            return 1;
+        }
+    }
+    
+    // Load dataset for training or full testing
     loaddata();
-    learn();
+    
+    // Try to load existing model or train new one
+    if (skip_training && load_model(model_file)) {
+        fprintf(stdout, "Using pre-trained model from %s\n\n", model_file);
+    } else {
+        if (skip_training) {
+            fprintf(stdout, "Could not load model, training new model...\n\n");
+        }
+        learn();
+        save_model(model_file);
+    }
+    
+    // Test custom image if provided
+    if (test_image_path) {
+        double custom_data[28][28];
+        if (load_single_image(test_image_path, custom_data) == 0) {
+            fprintf(stdout, "\n=== Testing Custom Image ===\n");
+            fprintf(stdout, "Image: %s\n", test_image_path);
+            test_single_image(custom_data);
+        } else {
+            fprintf(stderr, "Failed to load custom image: %s\n", test_image_path);
+        }
+    }
+    
     test();
 
     return 0;
@@ -255,13 +330,128 @@ static unsigned int classify(double data[28][28]) {
 static void test()
 {
 	int error = 0;
+	const char* class_names[] = {"Belts", "Shoes", "Watch"};
+	int confusion_matrix[3][3] = {0}; // [actual][predicted]
 
 	for (int i = 0; i < test_cnt; ++i) {
-		if (classify(test_set[i].data) != test_set[i].label) {
+		unsigned int predicted = classify(test_set[i].data);
+		unsigned int actual = test_set[i].label;
+		
+		confusion_matrix[actual][predicted]++;
+		
+		if (predicted != actual) {
 			++error;
 		}
 	}
 
-	fprintf(stdout, "Error Rate: %.2lf%%\n",
+	fprintf(stdout, "\n=== Test Results ===\n");
+	fprintf(stdout, "Total Test Samples: %d\n", test_cnt);
+	fprintf(stdout, "Correct: %d\n", test_cnt - error);
+	fprintf(stdout, "Incorrect: %d\n", error);
+	fprintf(stdout, "Accuracy: %.2lf%%\n", 
+		(1.0 - double(error) / double(test_cnt)) * 100.0);
+	fprintf(stdout, "Error Rate: %.2lf%%\n\n",
 		double(error) / double(test_cnt) * 100.0);
+	
+	fprintf(stdout, "Confusion Matrix:\n");
+	fprintf(stdout, "Actual\\Predicted   Belts  Shoes  Watch\n");
+	fprintf(stdout, "----------------------------------------\n");
+	for (int i = 0; i < 3; i++) {
+		fprintf(stdout, "%-15s", class_names[i]);
+		for (int j = 0; j < 3; j++) {
+			fprintf(stdout, "%7d", confusion_matrix[i][j]);
+		}
+		fprintf(stdout, "\n");
+	}
+	fprintf(stdout, "===================\n");
+}
+
+// Save model weights to file
+static void save_model(const char* filename) {
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
+        fprintf(stderr, "Failed to open file for writing: %s\n", filename);
+        return;
+    }
+    
+    // Save convolution layer weights and biases
+    fwrite(l_c1.weight, sizeof(float), l_c1.M * l_c1.N, file);
+    fwrite(l_c1.bias, sizeof(float), l_c1.N, file);
+    
+    // Save pooling layer weights and biases
+    fwrite(l_s1.weight, sizeof(float), l_s1.M * l_s1.N, file);
+    fwrite(l_s1.bias, sizeof(float), l_s1.N, file);
+    
+    // Save fully connected layer weights and biases
+    fwrite(l_f.weight, sizeof(float), l_f.M * l_f.N, file);
+    fwrite(l_f.bias, sizeof(float), l_f.N, file);
+    
+    fclose(file);
+    fprintf(stdout, "\nModel saved to %s\n", filename);
+}
+
+// Load model weights from file
+static bool load_model(const char* filename) {
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
+        return false;
+    }
+    
+    // Load convolution layer weights and biases
+    size_t read_count;
+    read_count = fread(l_c1.weight, sizeof(float), l_c1.M * l_c1.N, file);
+    if (read_count != l_c1.M * l_c1.N) {
+        fclose(file);
+        return false;
+    }
+    
+    read_count = fread(l_c1.bias, sizeof(float), l_c1.N, file);
+    if (read_count != l_c1.N) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load pooling layer weights and biases
+    read_count = fread(l_s1.weight, sizeof(float), l_s1.M * l_s1.N, file);
+    if (read_count != l_s1.M * l_s1.N) {
+        fclose(file);
+        return false;
+    }
+    
+    read_count = fread(l_s1.bias, sizeof(float), l_s1.N, file);
+    if (read_count != l_s1.N) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load fully connected layer weights and biases
+    read_count = fread(l_f.weight, sizeof(float), l_f.M * l_f.N, file);
+    if (read_count != l_f.M * l_f.N) {
+        fclose(file);
+        return false;
+    }
+    
+    read_count = fread(l_f.bias, sizeof(float), l_f.N, file);
+    if (read_count != l_f.N) {
+        fclose(file);
+        return false;
+    }
+    
+    fclose(file);
+    return true;
+}
+
+// Test a single custom image
+static void test_single_image(double data[28][28]) {
+    unsigned int prediction = classify(data);
+    
+    const char* class_names[] = {"Belts", "Shoes", "Watch"};
+    
+    fprintf(stdout, "\n=== Prediction Results ===\n");
+    fprintf(stdout, "Predicted class: %s (label %d)\n", class_names[prediction], prediction);
+    fprintf(stdout, "\nConfidence scores:\n");
+    for (int i = 0; i < 3; i++) {
+        fprintf(stdout, "  %s: %.4f\n", class_names[i], l_f.output[i]);
+    }
+    fprintf(stdout, "========================\n\n");
 }

@@ -213,4 +213,32 @@ static void split_dataset(image_data *all_data, unsigned int total_count,
     fprintf(stdout, "Train set: %d images, Test set: %d images\n", *train_cnt, *test_cnt);
 }
 
+/* Load a single image from file for testing/prediction */
+static int load_single_image(const char *filepath, double data[28][28]) {
+    // Load image
+    int width, height, channels;
+    unsigned char *img = stbi_load(filepath, &width, &height, &channels, 1); // Force grayscale
+    
+    if (!img) {
+        fprintf(stderr, "Error: Failed to load image %s\n", filepath);
+        return -1;
+    }
+    
+    // Resize to 28x28
+    unsigned char resized[28 * 28];
+    stbir_resize_uint8_linear(img, width, height, 0,
+                             resized, 28, 28, 0,
+                             STBIR_1CHANNEL);
+    
+    // Normalize to [0, 1]
+    for (int i = 0; i < 28; i++) {
+        for (int j = 0; j < 28; j++) {
+            data[i][j] = resized[i * 28 + j] / 255.0;
+        }
+    }
+    
+    stbi_image_free(img);
+    return 0;
+}
+
 #endif /* __IMAGE_LOADER_H__ */
