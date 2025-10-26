@@ -151,6 +151,7 @@ int main(int argc, const char **argv) {
             return 1;
         }
     }
+    fprintf(stdout ,"Visual Search Using CNN\n 2023BCS0017 - Jen Jose Jeeson\n 2023BCS0053 - Jefin Francis\n");
     
     // Load dataset for training or full testing
     loaddata();
@@ -249,7 +250,7 @@ static void learn() {
 	int current_epoch = 0;
 	
 	double time_taken = 0.0;
-    fprintf(stdout ,"Visual Search Using CNN\n 2023BCS0017 - Jen Jose Jeeson\n 2023BCS0053 - Jefin Francis\n");
+    
 	fprintf(stdout ,"Learning with %d epochs and adaptive learning rate (OpenMP)\n", total_epochs);
 
 	while (iter < 0 || iter-- > 0) {

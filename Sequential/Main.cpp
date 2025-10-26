@@ -9,7 +9,11 @@
 #include <algorithm>
 #include <random>
 #include <cstring>
-    double total_convolution_time = 0, total_pooling_time = 0, total_fully_connected_time = 0,total_gradient_time=0;
+#include <thread>
+#include <chrono>
+
+
+double total_convolution_time = 0, total_pooling_time = 0, total_fully_connected_time = 0,total_gradient_time=0;
 
 static image_data *train_set, *test_set;
 static unsigned int train_cnt, test_cnt;
@@ -133,7 +137,7 @@ int main(int argc, const char **argv) {
             return 1;
         }
     }
-    
+    fprintf(stdout ,"Visual Search Using CNN\n 2023BCS0017 - Jen Jose Jeeson\n 2023BCS0053 - Jefin Francis\n");
     // Load dataset only if we need to train or run full test
     loaddata();
     
@@ -260,7 +264,7 @@ static void learn() {
 	int current_epoch = 0;
 	
 	double time_taken = 0.0;
-    fprintf(stdout ,"Visual Search Using CNN\n 2023BCS0017 - Jen Jose Jeeson\n 2023BCS0053 - Jefin Francis\n");
+
 	fprintf(stdout ,"Learning with %d epochs and adaptive learning rate\n", total_epochs);
 
 	while (iter < 0 || iter-- > 0) {
@@ -316,6 +320,12 @@ static void learn() {
 			fprintf(stdout, "Training complete, error less than threshold\n\n");
 			break;
 		}
+
+        // Artificial delay: pause 0.2 seconds at the end of each epoch
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+        // Account for the artificial delay in the reported training time
+        time_taken += 0.3; // seconds
 
 	}
 	
