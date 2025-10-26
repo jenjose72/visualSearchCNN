@@ -16,10 +16,9 @@ g++ -O3 -std=c++11 -fopenmp Main.cpp -o cnn_openmp -lm
 
 ### OpenMP (train with N threads and evaluate)
 ```bash
-./Openmp/cnn_openmp -t 8   # use 8 threads (or omit -t to use the default)
+./Openmp/cnn_openmp -t 8
 ```
 
-During training, you’ll see epoch progress with error and current learning rate. At the end, a confusion matrix and accuracy are printed.
 
 ### Train and save (default file)
 ```bash
@@ -35,18 +34,15 @@ During training, you’ll see epoch progress with error and current learning rat
 
 ### Sequential
 ```bash
-# Fast: load model, classify one image, skip dataset and test set
 ./Sequential/cnn_sequential --load -i ~/Downloads/my_image.jpg --no-test
 ```
 
 ### OpenMP
 ```bash
-# Fast: if --load and -i are provided together, dataset is skipped
 ./Openmp/cnn_openmp --load -i ~/Downloads/my_image.jpg
 
-# Optional: also specify threads
 ./Openmp/cnn_openmp --load -i ~/Downloads/my_image.jpg -t 8
 ```
 
-The output shows the predicted class and confidence scores for Belts/Shoes/Watch.
+T
 

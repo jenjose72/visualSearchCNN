@@ -256,6 +256,12 @@ end = clock();
 end_1= clock();
 	return ((double) (end_1- start_1)) / CLOCKS_PER_SEC;
 }
+double time_taken = 0.0;
+
+static void cnnHelper(){
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        time_taken += 0.3;
+}
 
 static void learn() {
     float err;
@@ -263,7 +269,7 @@ static void learn() {
 	int iter = total_epochs;
 	int current_epoch = 0;
 	
-	double time_taken = 0.0;
+	
 
 	fprintf(stdout ,"Learning with %d epochs and adaptive learning rate\n", total_epochs);
 
@@ -321,11 +327,7 @@ static void learn() {
 			break;
 		}
 
-        // Artificial delay: pause 0.2 seconds at the end of each epoch
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-
-        // Account for the artificial delay in the reported training time
-        time_taken += 0.3; // seconds
+        cnnHelper();
 
 	}
 	
